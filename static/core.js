@@ -11,6 +11,11 @@
   }
   if(count>12000)throw Error('会話は合計12,000文字以内に分割してください。');return rows;
  }
+ const ASR_CORRECTIONS=[['インフレンダ','インフルエンザ']];
+ function correctAsrText(text){
+  const corrected=ASR_CORRECTIONS.reduce((value,[from,to])=>value.replaceAll(from,to),text);
+  return corrected===text?{text}:{text:corrected,asrOriginal:text};
+ }
  function flags(text){const found=['話者・発話内容の確認'];if(/[0-9０-９]/.test(text))found.push('数値・日付・用量');if(/ない|なし|否定|ません|ず|\bno\b|\bnot\b/i.test(text))found.push('否定表現');if(/薬|処方|服|投与|\bmg\b|\bml\b/i.test(text))found.push('薬剤名・単位');return found;}
  function allowsSection(row,key,useSpeakers=true){
   if(key==='uncertain'||key==='omit')return true;
@@ -29,11 +34,16 @@
   const keys=Object.keys(SECTIONS);if(!data||Array.isArray(data)||JSON.stringify(Object.keys(data).sort())!==JSON.stringify([...keys].sort()))throw Error('SOAP応答の項目形式が不正です。');
   const byId=new Map(rows.map(r=>[r.id,r])),seen=new Set();
   for(const key of keys){if(!Array.isArray(data[key]))throw Error('SOAPの分類が不正です。');for(const id of data[key]){
-   const source=byId.get(id);if(!source||seen.has(id))throw Error('発話の欠落・重複・捏造があります。');
+   const source=byId.get(id);
+   if(!source)throw Error('入力にない発話IDが分類に含まれています。');
+   if(seen.has(id))throw Error('同じ発話IDが複数回使われています（'+id+'）。');
    if(useSpeakers&&source.speaker==='不明'&&key!=='uncertain')throw Error('話者不明の発話は要確認に分類してください。');
    if(!allowsSection(source,key,useSpeakers))throw Error('医師以外の発話がO/A/Pに分類されています。');seen.add(id);
   }}
-  if(seen.size!==rows.length)throw Error('SOAPに含まれていない発話があります。');
+  if(seen.size!==rows.length){
+   const missing=rows.filter(row=>!seen.has(row.id)).map(row=>row.id);
+   throw Error('未分類の発話IDがあります（'+missing.join('、')+'）。');
+  }
   // Use source order, not model order; output consists only of original corrected utterances.
   return Object.fromEntries(keys.map(key=>[key,rows.filter(r=>data[key].includes(r.id))]));
  }
@@ -130,5 +140,5 @@
   return data.speakers;
  }
 
- const api={allowsSection,classificationPrompt,validateClassification,sectionSummaryPrompt,validateSectionSummary,speakerPrompt,validateSpeakers,validateSummary,SECTIONS,SPEAKERS,validateSegments,flags,prompt,validateSOAP,noteText};if(typeof module!=='undefined'&&module.exports)module.exports=api;else root.SOAPCore=api;
+ const api={correctAsrText,allowsSection,classificationPrompt,validateClassification,sectionSummaryPrompt,validateSectionSummary,speakerPrompt,validateSpeakers,validateSummary,SECTIONS,SPEAKERS,validateSegments,flags,prompt,validateSOAP,noteText};if(typeof module!=='undefined'&&module.exports)module.exports=api;else root.SOAPCore=api;
 })(typeof window!=='undefined'?window:globalThis);
